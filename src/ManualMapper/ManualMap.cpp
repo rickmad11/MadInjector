@@ -297,35 +297,39 @@ namespace oManualMapper
 		//Step 7 handling TLS data
 		if(buffer->flags & MI_TLS)
 		{
-			//this is the reason why we disabled security cookies for this function
-			LDR_DATA_TABLE_ENTRY data_table_entry{ .DllBase = allocated_dll };
-			//static tls data fix
-			(void)buffer->pfLdrpHandleTlsData(&data_table_entry);
-
 			PIMAGE_DATA_DIRECTORY p_tls_entry = &p_optional_header->DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS];
 			PIMAGE_TLS_DIRECTORY p_tls_dir = reinterpret_cast<PIMAGE_TLS_DIRECTORY>(p_tls_entry->VirtualAddress + allocated_dll);
 
-			if (PIMAGE_TLS_CALLBACK* p_tls_callbacks = reinterpret_cast<PIMAGE_TLS_CALLBACK*>(p_tls_dir->AddressOfCallBacks))
+			//In case this option is checked but the loaded dll has no tls data which can lead to major issues especially when handle hijacking
+			if(p_tls_entry->Size)
 			{
-				for (; p_tls_callbacks && *p_tls_callbacks; p_tls_callbacks++)
-				{
-					//ctrl + click on PIMAGE_TLS_CALLBACK it literally says ULONGLONG AddressOfCallBacks; // PIMAGE_TLS_CALLBACK *;
-					//kinda makes sense array of function pointers lol
-					(*p_tls_callbacks)(allocated_dll, DLL_PROCESS_ATTACH, nullptr);
-				}
-			}
+				//this is the reason why we disabled security cookies for this function
+				LDR_DATA_TABLE_ENTRY data_table_entry{ .DllBase = allocated_dll };
+				//static tls data fix
+				(void)buffer->pfLdrpHandleTlsData(&data_table_entry);
 
-			//since LdrpHandleTlsData invokes LdrpAllocateTlsEntry the modules tls entry is added to the LdrpTlsList afaik, and we want ours to be removed
-			//since it contains our dll base address which we specified in the LdrDataTableEntry (PLIST_ENTRY -> ModuleEntry -> LdrDataTableEntry -> .DllBase = allocated_dll)
-			//thats how I understood it the code is from the gh injector without it, I would have left the stuff in the tlslist lol
-			//if you want to check where its being used yourself go into ida press g and paste LdrpTlsList you can go from there
-			for (PLIST_ENTRY curr = buffer->pLdrpTlsList->Flink; curr != buffer->pLdrpTlsList; curr = curr->Flink)
-			{
-				PTLS_ENTRY ptls_entry = reinterpret_cast<PTLS_ENTRY>(curr);
-				if (ptls_entry->ModuleEntry == reinterpret_cast<void*>(&data_table_entry))
+				if (PIMAGE_TLS_CALLBACK* p_tls_callbacks = reinterpret_cast<PIMAGE_TLS_CALLBACK*>(p_tls_dir->AddressOfCallBacks))
 				{
-					ptls_entry->ModuleEntry = nullptr;
-					break;
+					for (; p_tls_callbacks && *p_tls_callbacks; p_tls_callbacks++)
+					{
+						//ctrl + click on PIMAGE_TLS_CALLBACK it literally says ULONGLONG AddressOfCallBacks; // PIMAGE_TLS_CALLBACK *;
+						//kinda makes sense array of function pointers lol
+						(*p_tls_callbacks)(allocated_dll, DLL_PROCESS_ATTACH, nullptr);
+					}
+				}
+
+				//since LdrpHandleTlsData invokes LdrpAllocateTlsEntry the modules tls entry is added to the LdrpTlsList afaik, and we want ours to be removed
+				//since it contains our dll base address which we specified in the LdrDataTableEntry (PLIST_ENTRY -> ModuleEntry -> LdrDataTableEntry -> .DllBase = allocated_dll)
+				//thats how I understood it the code is from the gh injector without it, I would have left the stuff in the tlslist lol
+				//if you want to check where its being used yourself go into ida press g and paste LdrpTlsList you can go from there
+				for (PLIST_ENTRY curr = buffer->pLdrpTlsList->Flink; curr != buffer->pLdrpTlsList; curr = curr->Flink)
+				{
+					PTLS_ENTRY ptls_entry = reinterpret_cast<PTLS_ENTRY>(curr);
+					if (ptls_entry->ModuleEntry == reinterpret_cast<void*>(&data_table_entry))
+					{
+						ptls_entry->ModuleEntry = nullptr;
+						break;
+					}
 				}
 			}
 		}
