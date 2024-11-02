@@ -1,5 +1,11 @@
 #pragma once
 
+#ifdef MADINJECTOR_EXPORTS
+#define MI_API extern "C" __declspec(dllexport)
+#else
+#define MI_API extern "C" __declspec(dllimport)
+#endif
+
 //Entry
 MI_API
 bool wMadInjector(const wchar_t* dllpath, DWORD pid, DWORD64 injection_flag, DWORD64 execution_flag, DWORD64 additional_flags, bool is_x64 = true);
