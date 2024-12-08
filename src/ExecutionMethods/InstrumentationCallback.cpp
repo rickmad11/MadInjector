@@ -186,6 +186,11 @@ namespace oInstrumentationCallback
 			&return_status, sizeof(bool), 
 			nullptr);
 
+		//We cant set the ICB to null we either have to set it to some other function or do something that idk about yet.
+		//did the 23H2 even work? I think the behaviour is the same, but now I don't have access to a 23H2 machine to test it lol
+		if(Utility::GetWindowsVersion() == L"24H2")
+			return return_status;
+
 		Utility::FreeAllocatedMemoryEx(process_handle, "", allocated_ICB, allocated_shellcode);
 		
 		return return_status;
