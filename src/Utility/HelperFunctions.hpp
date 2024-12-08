@@ -171,5 +171,23 @@ namespace Utility
         sec_header->section_failed = true;
         return false;
     }
+
+    inline std::wstring GetWindowsVersion()
+    {
+        static NTSTATUS(WINAPI * pfRtlGetVersion) (OSVERSIONINFOEX*) = reinterpret_cast<decltype(pfRtlGetVersion)>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlGetVersion"));
+
+        OSVERSIONINFOEX osvi {.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEX) };
+
+	    if(!pfRtlGetVersion(&osvi))
+	    {
+            if (osvi.dwBuildNumber >= 26100)
+                return L"24H2";
+
+	    	else if (osvi.dwBuildNumber >= 22631)
+                return L"23H2";
+	    }
+
+        return { L"Unknown" };
+    }
 }
 

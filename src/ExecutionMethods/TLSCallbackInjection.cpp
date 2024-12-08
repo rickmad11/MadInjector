@@ -13,7 +13,9 @@ struct TLS_SHELLCODE_DATA
 	void* pFunctionArgs = nullptr;
 	PIMAGE_TLS_CALLBACK* pp_tls_callbacks = nullptr;
 	PIMAGE_TLS_CALLBACK p_tls_callback = nullptr;
+	BYTE* function_to_patch = nullptr;
 	bool is_executed = false;
+	bool is_WinVersion_24H2 = false;
 };
 
 #pragma code_seg (push)
@@ -33,6 +35,13 @@ static void __stdcall TLSCallbackShellcode(PVOID DllHandle, DWORD Reason, PVOID 
 
 	if(buffer->p_tls_callback)
 		(*buffer->pp_tls_callbacks)(DllHandle, Reason, Reserved);
+
+	//just updated to windows 24H2. I have 0 clue on what is happening I did not reverse shit yet so this is a quick fix, just for it to work.
+	if(buffer->is_WinVersion_24H2)
+	{
+		for (size_t i = 0; i < 5; i++)
+			buffer->function_to_patch[i] = '\x90';
+	}
 }
 
 static void __stdcall dummy__() { std::cout << " "; }
@@ -130,6 +139,12 @@ namespace oTlsCallback
 		tls_sc_data.pFunctionArgs					= allocated_memory_thread_data;
 		tls_sc_data.pFunction						= allocated_memory_code;
 
+		if (Utility::GetWindowsVersion() == L"24H2")
+		{
+			tls_sc_data.is_WinVersion_24H2 = true;
+			tls_sc_data.function_to_patch  = reinterpret_cast<BYTE*>(ntdll) + 0x1d84e;
+		}
+
 		if (!WriteProcessMemory(process_handle, allocated_tls_data, &tls_sc_data, sizeof(TLS_SHELLCODE_DATA), nullptr))
 		{
 			Utility::FreeAllocatedMemoryEx(process_handle, "failed writing tls shellcode data", allocated_tls_callback_function, allocated_tls_data);
@@ -154,12 +169,12 @@ namespace oTlsCallback
 			0x41, 0x53,																// push r11
 			0x9C,																	// pushf push all EFLAGS 
 			0x53,																	// push rbx
-			0x49, 0xB9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,				//movabs r9,buffer
-			0x49, 0xBA, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,				//movabs r10, shellcode function
-			0x48, 0x83, 0xE4, 0xF0,													//and rsp,-0x10
-			0x48, 0x83, 0xEC, 0x20,													//sub rsp,0x20
-			0x41, 0xFF, 0xD2,														//call r10
-			0x48, 0x83, 0xC4, 0x20,													//add rsp,0x20
+			0x49, 0xB9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,				// movabs r9,buffer
+			0x49, 0xBA, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,				// movabs r10, shellcode function
+			0x48, 0x83, 0xE4, 0xF0,													// and rsp,-0x10
+			0x48, 0x83, 0xEC, 0x20,													// sub rsp,0x20
+			0x41, 0xFF, 0xD2,														// call r10
+			0x48, 0x83, 0xC4, 0x20,													// add rsp,0x20
 			0x5b,																	// pop rbx
 			0x9D,																	// popfq pop all EFLAGS			
 			0x41, 0x5B,																// pop r11
@@ -169,11 +184,34 @@ namespace oTlsCallback
 			0x5A,																	// pop rdx
 			0x59,																	// pop rcx
 			0x58,																	// pop rax
-			0xC3
+			0xC3																	// ret
 		};
 
 		*reinterpret_cast<void**>(shellcode + 15) = allocated_tls_data;
 		*reinterpret_cast<void**>(shellcode + 25) = allocated_tls_callback_function;
+
+		//Windows 24H2 quick fix stuff
+		BYTE* function_to_patch = nullptr;
+		DWORD function_to_patch_page_protection = 0;
+		BYTE function_to_patch_instructions[5] = {};
+
+		if(Utility::GetWindowsVersion() == L"24H2")
+		{
+			//just updated to windows 24H2. I have 0 clue on what is happening I did not reverse shit yet so this is a quick fix, just for it to work.
+			function_to_patch = reinterpret_cast<BYTE*>(ntdll) + 0x1d84e;
+			
+			if (!VirtualProtectEx(process_handle, function_to_patch, 1, PAGE_EXECUTE_READWRITE, &function_to_patch_page_protection))
+			{
+				Utility::FreeAllocatedMemoryEx(process_handle, "failed changing page protection", allocated_tls_callback_function, allocated_tls_data);
+				return false;
+			}
+			
+			if (!ReadProcessMemory(process_handle, function_to_patch, &function_to_patch_instructions, sizeof(function_to_patch_instructions), nullptr))
+			{
+				Utility::FreeAllocatedMemoryEx(process_handle, "failed reading", allocated_tls_callback_function, allocated_tls_data);
+				return false;
+			}
+		}
 
 		//using the allocated page from the function which should be enough for the shellcode for now.
 		if(!WriteProcessMemory(process_handle, reinterpret_cast<BYTE*>(allocated_tls_callback_function) + function_size, shellcode, sizeof(shellcode), nullptr))
@@ -227,6 +265,18 @@ namespace oTlsCallback
 		(void)ReadProcessMemory(process_handle, &reinterpret_cast<TLS_SHELLCODE_DATA*>(allocated_tls_data)->is_executed, &status, 1, nullptr);
 
 		Utility::FreeAllocatedMemoryEx(process_handle, "", allocated_tls_callback_function, allocated_tls_data);
+
+		//Windows 11 Version 24H2 quick fix
+		if (function_to_patch)
+		{
+			if (!WriteProcessMemory(process_handle, function_to_patch, &function_to_patch_instructions, sizeof(function_to_patch_instructions), nullptr))
+			{
+				Utility::FreeAllocatedMemoryEx(process_handle, "failed patching guard_dispatch_icall_nop", allocated_tls_callback_function, allocated_tls_data);
+				return false;
+			}
+		
+			(void)VirtualProtectEx(process_handle, function_to_patch, 1, function_to_patch_page_protection, &function_to_patch_page_protection);
+		}
 
 		return status;
 	}

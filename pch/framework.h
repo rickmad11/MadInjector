@@ -6,6 +6,7 @@
 #include <Shellapi.h>
 #include <TlHelp32.h>
 #include <AclAPI.h>
+#include <versionhelpers.h>
 
 //STL
 #include <string>
